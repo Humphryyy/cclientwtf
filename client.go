@@ -1,10 +1,10 @@
 package cclient
 
 import (
-	"golang.org/x/net/proxy"
 	"net/http"
 
-	utls "github.com/Titanium-ctrl/utls"
+	utls "github.com/refraction-networking/utls"
+	"golang.org/x/net/proxy"
 )
 
 func NewClient(clientHello utls.ClientHelloID, proxyUrl ...string) (http.Client, error) {
@@ -13,12 +13,16 @@ func NewClient(clientHello utls.ClientHelloID, proxyUrl ...string) (http.Client,
 		if err != nil {
 			return http.Client{}, err
 		}
+
 		return http.Client{
 			Transport: newRoundTripper(clientHello, dialer),
 		}, nil
+
 	} else {
+
 		return http.Client{
 			Transport: newRoundTripper(clientHello, proxy.Direct),
 		}, nil
+
 	}
 }

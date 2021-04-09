@@ -5,15 +5,15 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
-	"strings"
-	"sync"
-
+	utls "github.com/refraction-networking/utls"
 	"golang.org/x/net/http2"
 	"golang.org/x/net/proxy"
-
-	utls "github.com/Titanium-ctrl/utls"
+	"io"
+	"net"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
 )
 
 var errProtocolNegotiated = errors.New("protocol negotiated")
@@ -21,10 +21,11 @@ var errProtocolNegotiated = errors.New("protocol negotiated")
 type roundTripper struct {
 	sync.Mutex
 
-	clientHelloId     utls.ClientHelloID
-
-	cachedConnections map[string]net.Conn
-	cachedTransports  map[string]http.RoundTripper
+	clientHelloId      utls.ClientHelloID
+	keyLog             io.Writer
+	InsecureSkipVerify bool
+	cachedConnections  map[string]net.Conn
+	cachedTransports   map[string]http.RoundTripper
 
 	dialer proxy.ContextDialer
 }
@@ -82,7 +83,7 @@ func (rt *roundTripper) dialTLS(ctx context.Context, network, addr string) (net.
 	if host, _, err = net.SplitHostPort(addr); err != nil {
 		host = addr
 	}
-	
+
 	conn := utls.UClient(rawConn, &utls.Config{ServerName: host}, rt.clientHelloId)
 	if err = conn.Handshake(); err != nil {
 		_ = conn.Close()
@@ -122,25 +123,32 @@ func (rt *roundTripper) getDialTLSAddr(req *http.Request) string {
 	}
 	return net.JoinHostPort(req.URL.Host, "443") // we can assume port is 443 at this point
 }
-
+func getKeyLog() (io.Writer, error) {
+	return os.OpenFile(os.Getenv("KEYLOG_FN"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+}
 func newRoundTripper(clientHello utls.ClientHelloID, dialer ...proxy.ContextDialer) http.RoundTripper {
+	_keyLog, err := getKeyLog()
+	keyLog := _keyLog
+	if err != nil {
+		keyLog = nil
+	}
 	if len(dialer) > 0 {
 		return &roundTripper{
-			dialer: dialer[0],
-
-			clientHelloId: clientHello,
-
-			cachedTransports:  make(map[string]http.RoundTripper),
-			cachedConnections: make(map[string]net.Conn),
+			dialer:             dialer[0],
+			keyLog:             keyLog,
+			clientHelloId:      clientHello,
+			InsecureSkipVerify: true, //os.Getenv("INSECURE_SKIP_VERIFY") == "1",
+			cachedTransports:   make(map[string]http.RoundTripper),
+			cachedConnections:  make(map[string]net.Conn),
 		}
 	} else {
 		return &roundTripper{
-			dialer: proxy.Direct,
-
-			clientHelloId: clientHello,
-
-			cachedTransports:  make(map[string]http.RoundTripper),
-			cachedConnections: make(map[string]net.Conn),
+			dialer:             proxy.Direct,
+			keyLog:             keyLog,
+			clientHelloId:      clientHello,
+			InsecureSkipVerify: true, //os.Getenv("INSECURE_SKIP_VERIFY") == "1",
+			cachedTransports:   make(map[string]http.RoundTripper),
+			cachedConnections:  make(map[string]net.Conn),
 		}
 	}
 }
